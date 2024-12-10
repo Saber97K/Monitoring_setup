@@ -1,0 +1,108 @@
+version: '3.8'
+
+x-logging: &default-logging
+  driver: loki
+  options:
+    loki-url: 'http://loki:3100/loki/api/v1/push'
+    loki-pipeline-stages: |
+      - multiline:
+          firstline: '^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}'
+          max_wait_time: 3s
+      - regex:
+          expression: '^(?P<time>\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2},\d{3}) (?P<message>(?s:.*))$$'
+
+
+networks:
+  monitoring:
+    driver: bridge
+
+services:
+
+  loki:
+    image: grafana/loki:3.0.0
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yml:/etc/loki/local-config.yaml
+      - ./loki/chunks:/loki/chunks  # Data persistence
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+
+  rabbitmq:
+    build:
+      context: .
+      dockerfile: Dockerfile.rabbitmq
+    container_name: rabbitmq
+    ports:
+      - "15672:15672"  # RabbitMQ Management UI
+      - "5672:5672"    # RabbitMQ default AMQP port
+      - "15692:15692"  # RabbitMQ Prometheus metrics port
+    networks:
+      - monitoring
+    volumes:
+      - ./rabbitmq:/var/lib/rabbitmq  # Example for RabbitMQ data storage
+    depends_on:
+      - loki
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus_data:/prometheus  # Mount a volume for Prometheus data
+    ports:
+      - "9090:9090"    # Prometheus UI
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'  # Enable remote write receiver
+    logging: *default-logging
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring
+    volumes:
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./grafana/dashboards:/etc/grafana/dashboards
+      - ./grafana_data:/var/lib/grafana
+    environment:
+      GF_INSTALL_PLUGINS: "flant-statusmap-panel,grafana-piechart-panel"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_FEATURE_TOGGLES_ENABLE: "timeSeriesTable"
+    user: "0"  # Run as root (UID 0)
+    logging: *default-logging
+
+
+  otel-collector:
+      image: otel/opentelemetry-collector-contrib:latest
+      container_name: otel-collector
+      ports:
+        - "4317:4317"  # OTLP gRPC
+        - "4318:4318"  # OTLP HTTP
+        - "9464:9464"  # Prometheus metrics scraping
+      volumes:
+        - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      command: ["--config", "/etc/otel-collector-config.yaml"]
+      networks:
+        - monitoring
+      restart: unless-stopped
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+    networks:
+      - monitoring
+    restart: unless-stopped
