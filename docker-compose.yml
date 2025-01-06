@@ -3,14 +3,13 @@ version: '3.8'
 x-logging: &default-logging
   driver: loki
   options:
-    loki-url: 'http://loki:3100/loki/api/v1/push'
+    loki-url: 'http://localhost:3100/api/prom/push'
     loki-pipeline-stages: |
       - multiline:
           firstline: '^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}'
           max_wait_time: 3s
       - regex:
           expression: '^(?P<time>\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2},\d{3}) (?P<message>(?s:.*))$$'
-
 
 networks:
   monitoring:
@@ -58,8 +57,10 @@ services:
       - "9090:9090"    # Prometheus UI
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
       - '--web.enable-remote-write-receiver'  # Enable remote write receiver
     logging: *default-logging
+    user: "0"
     networks:
       - monitoring
 
@@ -98,11 +99,13 @@ services:
         - monitoring
       restart: unless-stopped
 
-  zipkin:
-    image: openzipkin/zipkin:latest
-    container_name: zipkin
+  tempo:
+    image: grafana/tempo:2.4.1
+    command: [ "-config.file=/etc/tempo/tempo-config.yaml" ]
+    volumes:
+      - ./tempo-config.yaml:/etc/tempo/tempo-config.yaml
+      - ./tempo-data:/tmp/tempo
     ports:
-      - "9411:9411"
+      - "3200:3200"   # tempo
     networks:
       - monitoring
-    restart: unless-stopped

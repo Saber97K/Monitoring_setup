@@ -14,7 +14,3 @@ scrape_configs:
     scrape_interval: 10s
     static_configs:
       - targets: ['otel-collector:9464']  # Use 'otel-collector' if Prometheus is in the same Docker network
-
-remote_write:
-  - url: "http://localhost:9090/api/v1/write"  # Corrected URL to match your container network
-

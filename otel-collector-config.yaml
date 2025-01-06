@@ -8,12 +8,14 @@ receivers:
 
 exporters:
   debug: {}  # Use for debugging if needed
-  zipkin:
-    endpoint: "http://zipkin:9411/api/v2/spans"
   prometheus:
     endpoint: "0.0.0.0:9464"
   loki:
     endpoint: "http://loki:3100/loki/api/v1/push"
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
 
 
 connectors:
@@ -24,21 +26,27 @@ connectors:
       - name: http.route
 
 
-
 processors:
   batch: {}
+  filter/logs:
+    logs:
+      exclude:
+        match_type: regexp
+        resource_attributes:
+          - key: instrumentation_scope.name
+            value: "Microsoft.AspNetCore.*"
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [spanmetrics,debug, zipkin]
+      exporters: [spanmetrics,debug, otlp/tempo]
     metrics:
       receivers: [otlp,spanmetrics]
       processors: [batch]
       exporters: [prometheus]
     logs:
       receivers: [otlp] 
-      processors: [batch]
+      processors: [batch, filter/logs]
       exporters: [loki]
